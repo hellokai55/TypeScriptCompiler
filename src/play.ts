@@ -6,45 +6,186 @@ interface Token {
     text: string;
 }
 
-let tokenArray: Token[] = [
-    { kind: TokenKind.Keyword, text: 'function' },
-    { kind: TokenKind.Identifier, text: 'sayHello' },
-    { kind: TokenKind.Seperator, text: '(' },
-    { kind: TokenKind.Seperator, text: ')' },
-    { kind: TokenKind.Seperator, text: '{' },
-    { kind: TokenKind.Identifier, text: 'println' },
-    { kind: TokenKind.Seperator, text: '(' },
-    { kind: TokenKind.StringLiteral, text: 'Hello World!' },
-    { kind: TokenKind.Seperator, text: ')' },
-    { kind: TokenKind.Seperator, text: ';' },
-    { kind: TokenKind.Seperator, text: '}' },
-    { kind: TokenKind.Identifier, text: 'sayHello' },
-    { kind: TokenKind.Seperator, text: '(' },
-    { kind: TokenKind.Seperator, text: ')' },
-    { kind: TokenKind.Seperator, text: ';' },
-    { kind: TokenKind.EOF, text: '' }
-];
+class CharStream {
+    data: string;
+    pos: number = 0;
+    line: number = 1;
+    col: number = 0;
+    constructor(data: string) {
+        this.data = data;
+    }
+    peek(): string {
+        return this.data.charAt(this.pos);
+    }
+    next(): string {
+        let ch = this.data.charAt(this.pos++);
+        if (ch == '\n') {
+            this.line++;
+            this.col = 0;
+        } else {
+            this.col++;
+        }
+        return ch;
+    }
+    eof(): boolean {
+        return this.peek() == '';
+    }
+}
 
 class Tokenizer {
-    private tokens: Token[];
-    private pos: number = 0;
 
-    constructor(tokens: Token[]) {
-        this.tokens = tokens;
+    stream: CharStream;
+    nextToken: Token = { kind: TokenKind.EOF, text: "" };
+
+    constructor(stream: CharStream) {
+        this.stream = stream;
     }
     next(): Token {
-        if (this.pos >= this.tokens.length) {
-            return { kind: TokenKind.EOF, text: '' };
+        if (this.nextToken.kind == TokenKind.EOF && !this.stream.eof()) {
+            this.nextToken = this.getAToken();
         }
-        return this.tokens[this.pos++];
+        let lastToken = this.nextToken;
+        this.nextToken = this.getAToken();
+        return lastToken;
+    }
+    peek(): Token {
+        if (this.nextToken.kind == TokenKind.EOF && !this.stream.eof()) {
+            this.nextToken = this.getAToken();
+        }
+        return this.nextToken;
+    }
+    private getAToken(): Token {
+        this.skipWhiteSpace();
+        if (this.stream.eof()) {
+            return { kind: TokenKind.EOF, text: "" };
+        } else {
+            let ch: string = this.stream.peek();
+            if (this.isLetter(ch) || this.isDigit(ch)) {
+                return this.parseIdentifier();
+            } else if (ch == '"') {
+                return this.parseStringLiteral();
+            } else if (ch == '(' || ch == ')' || ch == '{' || ch == '}' || ch == ',' || ch == ';') {
+                this.stream.next();
+                return { kind: TokenKind.Seperator, text: ch };
+            } else if (ch == '/') {
+                this.stream.next()
+                let ch1 = this.stream.peek();
+                if (ch1 == '*') {
+                    this.skipMultipleLineComments();
+                    return this.getAToken();
+                } else if (ch1 == '/') {
+                    this.skipSingleLineComment();
+                    return this.getAToken();
+                } else if (ch1 == '=') {
+                    this.stream.next();
+                    return { kind: TokenKind.Operator, text: '/=' };
+                } else {
+                    return { kind: TokenKind.Operator, text: '/' };
+                }
+            } else if (ch == '+') {
+                this.stream.next();
+                let ch1 = this.stream.peek();
+                if (ch1 == '+') {
+                    this.stream.next();
+                    return { kind: TokenKind.Operator, text: '++' };
+                } else if (ch1 == '=') {
+                    this.stream.next();
+                    return { kind: TokenKind.Operator, text: '+=' };
+                } else {
+                    return { kind: TokenKind.Operator, text: '+' };
+                }
+            } else if (ch == '-') {
+                this.stream.next();
+                let ch1 = this.stream.peek();
+                if (ch1 == '-') {
+                    this.stream.next();
+                    return { kind: TokenKind.Operator, text: '--' };
+                } else if (ch1 == '=') {
+                    this.stream.next();
+                    return { kind: TokenKind.Operator, text: '-=' };
+                } else {
+                    return { kind: TokenKind.Operator, text: '-' };
+                }
+            } else if (ch == '*') {
+                this.stream.next();
+                let ch1 = this.stream.peek();
+                if (ch1 == '=') {
+                    this.stream.next();
+                    return { kind: TokenKind.Operator, text: '*=' };
+                } else {
+                    return { kind: TokenKind.Operator, text: '*' };
+                }
+            } else {
+                console.log("Unrecognized character: " + ch);
+                this.stream.next();
+                return this.getAToken();
+            }
+        }
+    }
+    private parseIdentifier(): Token {
+        let token = { kind: TokenKind.Identifier, text: "" };
+        token.text += this.stream.next();
+        while (!this.stream.eof() && this.isLetterDigitOrUnderscore(this.stream.peek())) {
+            token.text += this.stream.next();
+        }
+        if (token.text == 'function') {
+            token.kind = TokenKind.Keyword;
+        }
+        return token;
     }
 
-    position(): number {
-        return this.pos;
+    private parseStringLiteral(): Token {
+        let token = { kind: TokenKind.StringLiteral, text: '' };
+        this.stream.next();
+        while (!this.stream.eof() && this.stream.peek() != '"') {
+            token.text += this.stream.next();
+        }
+        if (this.stream.peek() == '"') {
+            this.stream.next();
+        } else {
+            console.log("Expecting an \" at line: " + this.stream.line + " col: " + this.stream.col);
+        }
+        return token;
     }
-
-    traceBack(newPos: number): void {
-        this.pos = newPos;
+    private skipMultipleLineComments(): void {
+        this.stream.next();
+        if (!this.stream.eof()) {
+            let ch1 = this.stream.next();
+            while (!this.stream.eof()) {
+                let ch2 = this.stream.next();
+                if (ch1 == '*' && ch2 == '/') {
+                    return;
+                }
+                ch1 = ch2;
+            }
+        }
+        console.log("Failed to find a */ at line " + this.stream.line + " col " + this.stream.col);
+    }
+    private skipSingleLineComment(): void {
+        this.stream.next();
+        while (this.stream.peek() != '\n' && !this.stream.eof()) {
+            this.stream.next();
+        }
+    }
+    private skipWhiteSpace(): void {
+        while (this.isWhiteSpace(this.stream.peek())) {
+            this.stream.next();
+        }
+    }
+    private isLetterDigitOrUnderscore(ch: string): boolean {
+        return (ch >= 'A' && ch <= 'Z' ||
+            ch >= 'a' && ch <= 'z' ||
+            ch >= '0' && ch <= '9' ||
+            ch == '_');
+    }
+    private isLetter(ch: string): boolean {
+        return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+    }
+    private isDigit(ch: string): boolean {
+        return (ch >= '0' && ch <= '9');
+    }
+    private isWhiteSpace(ch: string): boolean {
+        return (ch == ' ' || ch == '\n' || ch == '\t');
     }
 }
 
@@ -94,21 +235,9 @@ class FunctionBody extends Statement {
         super();
         this.stmts = stmts;
     }
-    static isFunctionBodyNode(node: any): node is FunctionBody {
-        if (!node) {
-            return false;
-        }
-        if (Object.getPrototypeOf(node) === FunctionBody.prototype) {
-            return true;
-        } else {
-            return false;
-        }
-    }
     public dump(prefix: String): void {
         console.log(prefix + 'FunctionBody');
-        for (let stmt of this.stmts) {
-            stmt.dump(prefix + '  ');
-        }
+        this.stmts.forEach(x => x.dump(prefix + '  '));
     }
 }
 
@@ -121,21 +250,9 @@ class FunctionCall extends Statement {
         this.name = name;
         this.parameters = parameters;
     }
-    static isFunctionCallNode(node: any): node is FunctionCall {
-        if (!node) {
-            return false;
-        }
-        if (Object.getPrototypeOf(node) === FunctionCall.prototype) {
-            return true;
-        } else {
-            return false;
-        }
-    }
     public dump(prefix: String): void {
         console.log(prefix + 'FunctionCall ' + this.name);
-        for (let param of this.parameters) {
-            console.log(prefix + '  ' + param);
-        }
+        this.parameters.forEach(x => console.log(prefix + "\t" + "Parameter: " + x));
     }
 }
 
@@ -146,82 +263,81 @@ class Parser {
     }
     parseProg(): Prog {
         let stmts: Statement[] = [];
-        let stmt: Statement | null | void = null;
-        while (true) {
-            stmt = this.parseFunctionDecl();
-            console.log("parseProg: unexpected token " + stmt);
-            if (Statement.isStatementNode(stmt)) {
+        let stmt: Statement | null = null;
+        let token = this.tokenizer.peek();
+        while (token.kind != TokenKind.EOF) {
+            if (token.kind == TokenKind.Keyword && token.text == 'function') {
+                stmt = this.parseFunctionDecl();
+            } else if (token.kind == TokenKind.Identifier) {
+                stmt = this.parseFunctionCall();
+            }
+            if (stmt != null) {
                 stmts.push(stmt);
-                continue;
+                console.log("success");
+            } else {
+                //  console.log("Unrecognized token: " + token.text);
             }
-            stmt = this.parseFunctionCall();
-            if (Statement.isStatementNode(stmt)) {
-                stmts.push(stmt);
-                continue;
-            }
-            if (stmt == null) {
-                break;
-            }
+            token = this.tokenizer.peek();
         }
         return new Prog(stmts);
     }
 
-    parseFunctionDecl(): FunctionDecl | null | void {
-        let oldPos: number = this.tokenizer.position();
+    parseFunctionDecl(): FunctionDecl | null {
+        this.tokenizer.next();
         let t: Token = this.tokenizer.next();
         console.log("parseFunctionDecl: " + t.text);
-        if (t.kind == TokenKind.Keyword && t.text == "function") {
-            t = this.tokenizer.next();
-            if (t.kind == TokenKind.Identifier) {
-                let t1 = this.tokenizer.next();
-                if (t1.text == '(') {
-                    let t2 = this.tokenizer.next();
-                    if (t2.text == ')') {
-                        let functionBody = this.parseFunctionBody();
-                        if (FunctionBody.isFunctionBodyNode(functionBody)) {
-                            return new FunctionDecl(t.text, functionBody);
-                        }
+        if (t.kind == TokenKind.Identifier) {
+            let t1 = this.tokenizer.next();
+            if (t1.text == "(") {
+                let t2 = this.tokenizer.next();
+                if (t2.text == ")") {
+                    let functionBody = this.parseFunctionBody();
+                    if (functionBody != null) {
+                        return new FunctionDecl(t.text, functionBody);
                     } else {
-                        console.log("Expecting ')' in FunctionDecl, while we got a " + t.text);
-                        return;
+                        return null;
                     }
                 } else {
-                    console.log("Expecting '(' in FunctionDecl, while we got a " + t.text);
-                    return;
+                    return null;
                 }
+            } else {
+                return null;
             }
+        } else {
+            console.log("Expecting 'function' in FunctionDecl, while we got a " + t.text);
+            return null;
         }
-        this.tokenizer.traceBack(oldPos);
         return null;
     }
 
-    parseFunctionBody(): FunctionBody | null | void {
-        let oldPos: number = this.tokenizer.position();
+    parseFunctionBody(): FunctionBody | null {
         let stmts: FunctionCall[] = [];
         let t: Token = this.tokenizer.next();
         if (t.text == "{") {
-            let functionCall = this.parseFunctionCall();
-            while (FunctionCall.isFunctionCallNode(functionCall)) {
-                stmts.push(functionCall);
-                functionCall = this.parseFunctionCall();
+            while (this.tokenizer.peek().kind == TokenKind.Identifier) {
+                let functionCall = this.parseFunctionCall();
+                if (functionCall != null) {
+                    stmts.push(functionCall);
+                } else {
+                    console.log("Error parsing a FunctionCall in FunctionBody");
+                    return null;
+                }
             }
             t = this.tokenizer.next();
             if (t.text == "}") {
                 return new FunctionBody(stmts);
             } else {
                 console.log("Expecting '}' in FunctionBody, while we got a " + t.text);
-                return;
+                return null;
             }
         } else {
             console.log("Expecting '{' in FunctionBody, while we got a " + t.text);
-            return;
+            return null;
         }
-        this.tokenizer.traceBack(oldPos);
         return null;
     }
 
-    parseFunctionCall(): FunctionCall | null | void {
-        let oldPos: number = this.tokenizer.position();
+    parseFunctionCall(): FunctionCall | null {
         let param: string[] = [];
         let t: Token = this.tokenizer.next();
         if (t.kind == TokenKind.Identifier) {
@@ -233,7 +349,7 @@ class Parser {
                         param.push(t2.text);
                     } else {
                         console.log("Expecting string literal in FunctionCall, while we got a " + t2.text);
-                        return;
+                        return null;
                     }
                     t2 = this.tokenizer.next();
                     if (t2.text != ")") {
@@ -241,7 +357,7 @@ class Parser {
                             t2 = this.tokenizer.next();
                         } else {
                             console.log("Expecting ',' in FunctionCall, while we got a " + t2.text);
-                            return;
+                            return null;
                         }
                     }
                 }
@@ -250,11 +366,10 @@ class Parser {
                     return new FunctionCall(t.text, param);
                 } else {
                     console.log("Expecting ';' in FunctionCall, while we got a " + t2.text);
-                    return;
+                    return null;
                 }
             }
         }
-        this.tokenizer.traceBack(oldPos);
         return null;
     }
 
@@ -368,13 +483,18 @@ class Interpretor extends AstVisitor {
     }
 }
 
-function compileAndRun() {
-    console.log("compile and run");
-    let tokenizer = new Tokenizer(tokenArray);
-    console.log("token:");
-    for (let token of tokenArray) {
-        console.log(token);
+function compileAndRun(program: string): void {
+    console.log("源代码:");
+    console.log(program);
+
+    let tokenizer = new Tokenizer(new CharStream(program));
+
+    while (tokenizer.peek().kind != TokenKind.EOF) {
+        console.log(tokenizer.next());
     }
+
+    tokenizer = new Tokenizer(new CharStream(program));
+
     //语法分析
     let prog: Prog = new Parser(tokenizer).parseProg();
     console.log("语法分析后的AST:");
@@ -390,4 +510,16 @@ function compileAndRun() {
     console.log("运行结果:" + retVal);
 }
 
-compileAndRun();
+import * as process from 'process';
+
+if (process.argv.length < 3) {
+    console.log("Usage: " + process.argv[0] + " " + process.argv[1] + " <filename>");
+    process.exit(1);
+}
+
+let fs = require('fs');
+let filename = process.argv[2];
+fs.readFile(filename, 'utf8', function (err: any, data: string) {
+    if (err) throw err;
+    compileAndRun(data);
+})

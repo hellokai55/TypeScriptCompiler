@@ -18,5 +18,8 @@
   "homepage": "https://github.com/hellokai55/TypeScriptCompiler#readme",
   "dependencies": {
     "typescript": "^4.7.4"
+  },
+  "devDependencies": {
+    "@types/node": "^18.6.4"
   }
 }
